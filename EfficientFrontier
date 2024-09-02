@@ -1,0 +1,37 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_efficient_frontier(ret, cov_mat, N=5000):
+    #  ensure input dimensions match
+    assert len(ret) == cov_mat.shape[0] == cov_mat.shape[1], 'Mismatch between returns and covariance matrix dimensions.'
+
+    # Precompute inverse covariance matrix
+    inv_cov = np.linalg.inv(cov_mat)
+
+    # Calculate coefficients for the quadratic optimization problem
+    a = np.dot(np.ones_like(ret), np.dot(inv_cov, ret))
+    b = np.dot(ret, np.dot(inv_cov, ret))
+    c = np.dot(np.ones_like(ret), np.dot(inv_cov, np.ones_like(ret)))
+    d = b * c - a ** 2
+
+    # Initialize arrays for target returns, volatilities, and weights
+    ret_arr = np.linspace(0.05, 0.2, N)
+    vol_arr = np.zeros(N)
+    weight_arr = np.zeros((N, len(ret)))
+
+    # Calculate weights and volatilities for each target return
+    for i, target_ret in enumerate(ret_arr):
+        w = (1 / d) * (c * np.dot(inv_cov, ret) - a * np.dot(inv_cov, np.ones_like(ret))) * target_ret + \
+            (1 / d) * (b * np.dot(inv_cov, np.ones_like(ret)) - a * np.dot(inv_cov, ret))
+        vol_arr[i] = np.sqrt(np.dot(w, np.dot(cov_mat, w)))
+        weight_arr[i, :] = w
+
+    # Plot the efficient frontier
+    plt.scatter(vol_arr, ret_arr, c='blue')
+    plt.xlabel('Volatility')
+    plt.ylabel('Return')
+    plt.title('Efficient Frontier')
+    plt.grid(True)
+    plt.show()
+
+    return weight_arr, ret_arr, vol_arr
