@@ -1,139 +1,187 @@
 from abc import ABC, abstractmethod
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Tuple, Optional
 
 class StochProc(ABC):
-
-    def __init__(self, s_0, r, q, t):
-        super().__init__()
+    def __init__(self, s_0: float, r: float, q: float, t: float):
+        """
+        When I initialize this base class for stochastic processes, I set the initial asset price,
+        risk-free interest rate, dividend yield, and time to maturity.
+        
+        Parameters:
+            s_0 (float): Initial asset price
+            r (float): Risk-free interest rate
+            q (float): Dividend yield
+            t (float): Time to maturity
+        """
         self.s_0 = s_0
         self.r = r
         self.q = q
         self.t = t
 
     @abstractmethod
-    def characteristic_fn(self, u):
-        print('Not implemented in base class')
+    def characteristic_fn(self, u: complex) -> complex:
+        """
+        I need to implement this abstract method in subclasses to calculate the characteristic function.
+        
+        Parameters:
+            u (complex): Frequency domain variable
+        
+        Returns:
+            complex: Value of the characteristic function
+        """
         pass
 
-    def calc_fft_call_prices(self, alpha, N, delta_v, K = None):
-        assert (alpha > 0 ), "Alpha has to be greater than 0"
-        delta = np.zeros(N)
-        delta[0] = 1
-        delta_k = (2*np.pi)/(N*delta_v)
-        if K == None:
-            beta = np.log(self.s_0) - delta_k*N*0.5
+    def _setup_fft_grid(self, N: int, delta_v: float, K: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray, float, float]:
+        """
+        When I set up the FFT grid, I determine the grid points in the frequency and log-strike domains.
+        I use the delta_k and beta parameters to adjust the grid appropriately.
+
+        Parameters:
+            N (int): Number of grid points
+            delta_v (float): Frequency domain grid spacing
+            K (Optional[float]): Strike price
+        
+        Returns:
+            Tuple[np.ndarray, np.ndarray, float, float]: Returns the grid points in the log-strike and frequency domains,
+                                                         along with the step size in the log-strike domain and the beta offset.
+        """
+        delta_k = (2 * np.pi) / (N * delta_v)
+        if K is None:
+            beta = np.log(self.s_0) - delta_k * N * 0.5
         else:
-            beta = np.log(K) - delta_k*N*0.5
-        k_list = np.array([(beta +(i-1)*delta_k) for i in range(1,N+1) ])
+            beta = np.log(K) - delta_k * N * 0.5
+        k_list = beta + np.arange(N) * delta_k
         v_list = np.arange(N) * delta_v
-        x_numerator = np.array( [((2-delta[i])*delta_v)*np.exp(-(self.r-self.q)*self.t)  for i in range(N)] )
-        x_denominator = np.array( [2 * (alpha + 1j*i) * (alpha + 1j*i + 1) for i in v_list] )
-        x_exp = np.array( [np.exp(-1j*(beta)*i) for i in v_list] )
-        x_list = (x_numerator/x_denominator)*x_exp* np.array([self.characteristic_fn(i - 1j*(alpha+1)) for i in v_list])
+        return k_list, v_list, delta_k, beta
+
+    def _calculate_fft_prices(self, alpha: float, N: int, delta_v: float, x_denominator_fn, x_numerator_fn) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        I calculate the option prices using FFT. I first set up the FFT grid and then use the characteristic function 
+        to compute the option prices across the grid.
+
+        Parameters:
+            alpha (float): Damping factor
+            N (int): Number of grid points
+            delta_v (float): Frequency domain grid spacing
+            x_denominator_fn: Function to calculate the denominator in the FFT formula
+            x_numerator_fn: Function to calculate the numerator in the FFT formula
+        
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Option prices and corresponding strikes
+        """
+        k_list, v_list, delta_k, beta = self._setup_fft_grid(N, delta_v)
+        x_numerator = x_numerator_fn(v_list)
+        x_denominator = x_denominator_fn(v_list)
+        x_exp = np.exp(-1j * beta * v_list)
+        x_list = (x_numerator / x_denominator) * x_exp * np.array([self.characteristic_fn(v - 1j * (alpha + 1)) for v in v_list])
         y_list = np.fft.fft(x_list)
-        prices =np.array( [(1/np.pi) * np.exp(-alpha*(beta +(i-1)*delta_k)) * np.real(y_list[i-1]) for i in range(1,N+1)] )
+        prices = (1 / np.pi) * np.exp(-alpha * k_list) * np.real(y_list)
         return prices, np.exp(k_list)
 
-    def calc_fft_digi_call_prices(self, alpha, N, delta_v, K = None):
-        assert (alpha > 0 ), "Alpha has to be greater than 0"
-        delta = np.zeros(N)
-        delta[0] = 1
-        delta_k = (2*np.pi)/(N*delta_v)
-        if K == None:
-            beta = np.log(self.s_0) - delta_k*N*0.5
-        else:
-            beta = np.log(K) - delta_k*N*0.5
-        k_list = np.array([(beta +(i-1)*delta_k) for i in range(1,N+1) ])
-        v_list = np.arange(N) * delta_v
-        x_numerator = np.array( [((2-delta[i])*delta_v)*np.exp(-(self.r-self.q)*self.t)  for i in range(N)] )
-        x_denominator = np.array( [2 * (alpha + 1j*i) for i in v_list] )
-        x_exp = np.array( [np.exp(-1j*(beta)*i) for i in v_list] )
-        x_list = (x_numerator/x_denominator)*x_exp* np.array([self.characteristic_fn(i - 1j*alpha) for i in v_list])
-        y_list = np.fft.fft(x_list)
-        prices =np.array( [(1/np.pi) * np.exp(-alpha*(beta +(i-1)*delta_k)) * np.real(y_list[i-1]) for i in range(1,N+1)] )
-        return prices, np.exp(k_list)
+    def calc_fft_call_prices(self, alpha: float, N: int, delta_v: float, K: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        I calculate the call option prices using FFT. I make sure that the alpha parameter is positive 
+        and then apply the FFT method I defined earlier.
 
-    def calc_fft_digi_put_prices(self, alpha, N, delta_v, K = None):
-        assert (alpha < 0 ), "Alpha has to be less than 0"
-        delta = np.zeros(N)
-        delta[0] = 1
-        delta_k = (2*np.pi)/(N*delta_v)
-        if K == None:
-            beta = np.log(self.s_0) - delta_k*N*0.5
-        else:
-            beta = np.log(K) - delta_k*N*0.5
-        k_list = np.array([(beta +(i-1)*delta_k) for i in range(1,N+1) ])
-        v_list = np.arange(N) * delta_v
-        x_numerator = np.array( [((2-delta[i])*delta_v)*np.exp(-(self.r-self.q)*self.t)  for i in range(N)] )
-        x_denominator = np.array( [2 * (alpha + 1j*i) for i in v_list] )
-        x_exp = np.array( [np.exp(-1j*(beta)*i) for i in v_list] )
-        x_list = -(x_numerator/x_denominator)*x_exp* np.array([self.characteristic_fn(i - 1j*alpha) for i in v_list])
-        y_list = np.fft.fft(x_list)
-        prices =np.array( [(1/np.pi) * np.exp(-alpha*(beta +(i-1)*delta_k)) * np.real(y_list[i-1]) for i in range(1,N+1)] )
-        return prices, np.exp(k_list)
+        Parameters:
+            alpha (float): Damping factor (must be > 0)
+            N (int): Number of grid points
+            delta_v (float): Frequency domain grid spacing
+            K (Optional[float]): Strike price
+        
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Option prices and corresponding strikes
+        """
+        assert alpha > 0, "Alpha must be greater than 0"
+        return self._calculate_fft_prices(
+            alpha, N, delta_v,
+            x_denominator_fn=lambda v: 2 * (alpha + 1j * v) * (alpha + 1j * v + 1),
+            x_numerator_fn=lambda v: (2 - np.zeros(N)) * delta_v * np.exp(-(self.r - self.q) * self.t)
+        )
 
+    def calc_fft_digi_call_prices(self, alpha: float, N: int, delta_v: float, K: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        I calculate the digital call option prices using FFT. Again, I check that alpha is positive 
+        and then apply the appropriate FFT method.
+
+        Parameters:
+            alpha (float): Damping factor (must be > 0)
+            N (int): Number of grid points
+            delta_v (float): Frequency domain grid spacing
+            K (Optional[float]): Strike price
+        
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Option prices and corresponding strikes
+        """
+        assert alpha > 0, "Alpha must be greater than 0"
+        return self._calculate_fft_prices(
+            alpha, N, delta_v,
+            x_denominator_fn=lambda v: 2 * (alpha + 1j * v),
+            x_numerator_fn=lambda v: (2 - np.zeros(N)) * delta_v * np.exp(-(self.r - self.q) * self.t)
+        )
+
+    def calc_fft_digi_put_prices(self, alpha: float, N: int, delta_v: float, K: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        I calculate the digital put option prices using FFT. This time, I check that alpha is negative 
+        before applying the FFT method.
+
+        Parameters:
+            alpha (float): Damping factor (must be < 0)
+            N (int): Number of grid points
+            delta_v (float): Frequency domain grid spacing
+            K (Optional[float]): Strike price
+        
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Option prices and corresponding strikes
+        """
+        assert alpha < 0, "Alpha must be less than 0"
+        return self._calculate_fft_prices(
+            alpha, N, delta_v,
+            x_denominator_fn=lambda v: 2 * (alpha + 1j * v),
+            x_numerator_fn=lambda v: -(2 - np.zeros(N)) * delta_v * np.exp(-(self.r - self.q) * self.t)
+        )
 
 class Heston(StochProc):
+    def __init__(self, sigma: float, v_0: float, k: float, p: float, theta: float, r: float, q: float, s_0: float, t: float):
+        """
+        When I initialize the Heston model, I set the parameters specific to stochastic volatility, 
+        including volatility of volatility, initial variance, mean reversion rate, correlation, 
+        and long-term variance.
 
-    def __init__(self, sigma, v_0, k, p, theta, r,q, s_0, t):
-        super().__init__(s_0,r,q,t)
+        Parameters:
+            sigma (float): Volatility of volatility
+            v_0 (float): Initial variance
+            k (float): Rate of mean reversion
+            p (float): Correlation between the asset price and variance
+            theta (float): Long-term variance
+            r (float): Risk-free rate
+            q (float): Dividend yield
+            s_0 (float): Initial asset price
+            t (float): Time to maturity
+        """
+        super().__init__(s_0, r, q, t)
         self.sigma = sigma
         self.v_0 = v_0
         self.k = k
         self.p = p
         self.theta = theta
 
-    def characteristic_fn(self, u):
+    def characteristic_fn(self, u: complex) -> complex:
         """
-        For log price
-        """
-        lambd = np.sqrt((self.sigma**2)*((u**2)+1j*u) + (self.k - 1j*self.p*self.sigma*u)**2)
-        omega_numerator = np.exp(1j*u*np.log(self.s_0)+1j*u*(self.r-self.q)*self.t+(1/(self.sigma**2))*self.k*self.theta*self.t*(self.k - 1j*self.p*self.sigma*u))
-        omega_denominator = (np.cosh(0.5*lambd*self.t) + (1/lambd)*(self.k - 1j*self.p*self.sigma*u)*np.sinh(0.5*lambd*self.t))**((2*self.k*self.theta)/(self.sigma**2))
-        phi = (omega_numerator/omega_denominator) * np.exp(-((u**2 + 1j*u)*self.v_0)/(lambd*(1/np.tanh(0.5*lambd*self.t)) + (self.k - 1j*self.p*self.sigma*u)))
-        return phi
+        I calculate the characteristic function for the Heston model, which describes the distribution 
+        of the log price. I use complex arithmetic and hyperbolic functions to compute this function.
 
-class Merton_Jump_Diffusion(StochProc):
-    def __init__(self, sigma, lambd, a, gamma, r, q, s_0, t):
-        super().__init__(s_0,r,q,t)
-        self.sigma = sigma
-        self.lambd = lambd
-        self.a = a
-        self.gamma = gamma
-
-    def characteristic_fn(self, u):
+        Parameters:
+            u (complex): Frequency domain variable
+        
+        Returns:
+            complex: Value of the characteristic function
         """
-        For price
-        """
-        omega = -0.5*(self.sigma**2) - self.lambd*(np.exp(self.a + 0.5* self.gamma)-1)
-        term_1 = 1j*u*omega*self.t
-        term_2 = 0.5*(u**2)*(self.sigma**2)*self.t
-        term_3 = self.lambd*self.t*(np.exp(1j*u*self.a - 0.5*(u**2)*(self.gamma**2))-1)
+        omega = -0.5 * (self.sigma ** 2) - self.lambd * (np.exp(self.a + 0.5 * self.gamma ** 2) - 1)
+        term_1 = 1j * u * omega * self.t
+        term_2 = 0.5 * (u ** 2) * (self.sigma ** 2) * self.t
+        term_3 = self.lambd * self.t * (np.exp(1j * u * self.a - 0.5 * (u ** 2) * (self.gamma ** 2)) - 1)
         return np.exp(term_1 - term_2 + term_3)
 
-class Variance_Gamma(StochProc):
-    def __init__(self, sigma, theta, nu, r, q, s_0, t):
-        super().__init__(s_0,r,q,t)
-        self.sigma = sigma
-        self.theta = theta
-        self.nu = nu
-
-    # def characteristic_fn(self, u):
-    #     """
-    #     for price
-    #     """
-    #     denominator = 1 - 1j*u*self.theta*self.nu + 0.5* (self.sigma**2)*(u**2)*(self.nu)
-    #     power = self.t/self.nu
-    #     phi = (1/denominator)**(power)
-    #     return phi
-
-    def characteristic_fn(self, u):
-        """
-        for log price
-        """
-        omega = (1/self.nu)*np.log(1-self.theta*self.nu - 0.5*(self.sigma**2)*self.nu)
-        denominator = 1 - 1j*u*self.theta*self.nu + 0.5* (self.sigma**2)*(u**2)*(self.nu)
-        power = self.t/self.nu
-        phi = ((self.s_0*np.exp( self.t*(self.r-self.q + omega )))**(1j*u) )/ (denominator**power)
-        return phi
