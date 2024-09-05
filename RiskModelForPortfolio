@@ -1,0 +1,68 @@
+import pandas as pd
+import numpy as np
+import logging
+from typing import List, Dict, Optional
+class RiskModel:
+    def __init__(self, factor_exposures: pd.DataFrame, 
+                 factor_covariance: pd.DataFrame, 
+                 specific_risk: pd.Series):
+        """
+Here is an explantions for my parameters:
+        - factor_exposures (pd.DataFrame): DataFrame where rows are assets and columns are factors.
+        - factor_covariance (pd.DataFrame): Covariance matrix of factors.
+        - specific_risk (pd.Series): Specific risk for each asset.
+        """
+        self.factor_exposures = factor_exposures
+        self.factor_covariance = factor_covariance
+        self.specific_risk = specific_risk
+        
+        # Validate inputs
+        self._validate_inputs()
+        
+    def _validate_inputs(self):
+        if not isinstance(self.factor_exposures, pd.DataFrame):
+            raise TypeError("factor_exposures must be a pandas DataFrame")
+        
+        if not isinstance(self.factor_covariance, pd.DataFrame):
+            raise TypeError("factor_covariance must be a pandas DataFrame")
+        
+        if not isinstance(self.specific_risk, pd.Series):
+            raise TypeError("specific_risk must be a pandas Series")
+        
+        if list(self.factor_exposures.columns) != list(self.factor_covariance.index):
+            raise ValueError("Factor names in factor_exposures and factor_covariance must match")
+        
+        if not set(self.factor_exposures.index) == set(self.specific_risk.index):
+            raise ValueError("Asset identifiers must match between factor_exposures and specific_risk")
+        
+    def calculate_factor_risk(self) -> pd.Series:
+
+        factor_risk = (self.factor_exposures @ self.factor_covariance) * self.factor_exposures
+        factor_risk = factor_risk.sum(axis=1)
+        return factor_risk
+    
+    def calculate_total_risk(self) -> pd.Series:
+    
+        factor_risk = self.calculate_factor_risk()
+        total_risk = factor_risk + self.specific_risk**2
+        return total_risk
+    
+    def calculate_risk_contributions(self) -> pd.DataFrame:
+       
+        factor_risk = self.calculate_factor_risk()
+        total_risk = self.calculate_total_risk()
+        
+        factor_contributions = self.factor_exposures @ self.factor_covariance
+        factor_contributions = factor_contributions.multiply(self.factor_exposures)
+        
+        specific_risk_contribution = self.specific_risk**2
+        
+        contributions = factor_contributions.copy()
+        contributions['Specific Risk'] = specific_risk_contribution
+        contributions['Total Risk'] = total_risk
+        
+        for col in self.factor_covariance.columns:
+            contributions[f'{col} Contribution'] = (contributions[col] / total_risk) * 100
+        
+        contributions['Specific Risk Contribution (%)'] = (contributions['Specific Risk'] / total_risk) * 100
+        return contributions
