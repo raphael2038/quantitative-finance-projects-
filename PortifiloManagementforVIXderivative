@@ -1,0 +1,51 @@
+import pandas as pd
+import numpy as np
+import yfinance as yf
+
+#this code enable to either use the data form yahoo finance (through the library yfiance) or from an excel documents
+def load_data(source, assets=None, start_date=None, end_date=None):
+    if source == 'excel':
+        data = pd.read_excel('VIXdataexamples.xlsx', index_col=0)
+    elif source == 'yfinance':
+        data = yf.download(assets, start=start_date, end=end_date)['Adj Close']
+    else:
+        raise ValueError("Invalid data source. Choose 'excel' or 'yfinance'.")
+    
+    return data
+
+source = input("Enter data source ('excel' or 'yfinance'): ").strip().lower()
+
+if source == 'excel':
+    # If Excel, ask for the file path
+    file_path = input("Enter the full file path of the Excel file: ").strip()
+    data = load_data(source='excel', file_path=file_path)
+
+elif source == 'yfinance':
+    # If yfinance, ask for assets and date range
+    assets = input("Enter the asset tickers (comma-separated, e.g., 'SPY,VXX,BND'): ").strip().split(',')
+    start_date = input("Enter the start date (YYYY-MM-DD): ").strip()
+    end_date = input("Enter the end date (YYYY-MM-DD): ").strip()
+    data = load_data(source='yfinance', assets=assets, start_date=start_date, end_date=end_date)
+
+else:
+    raise ValueError("Invalid input. Please enter either 'excel' or 'yfinance'.")
+
+data = load_data('excel')
+returns = data.pct_change().dropna()
+
+#here are weights that I used for the example
+weights = np.array([0.10, 0.60, 0.30])
+if len(weights) != returns.shape[1]:
+    raise ValueError("Number of weights must match the number of assets in the data.")
+
+
+portfolio_returns = returns.dot(weights)
+
+portfolio_volatility = np.std(portfolio_returns) * np.sqrt(252)
+portfolio_mean_return = np.mean(portfolio_returns) * 252
+risk_free_rate = 0.02
+sharpe_ratio = (portfolio_mean_return - risk_free_rate) / portfolio_volatility
+
+print(f'Annualized Portfolio Return: {portfolio_mean_return:.2%}')
+print(f'Annualized Portfolio Volatility: {portfolio_volatility:.2%}')
+print(f'Sharpe Ratio: {sharpe_ratio:.2f}')
