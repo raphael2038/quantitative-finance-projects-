@@ -43,6 +43,7 @@ portfolio_returns = returns.dot(weights)
 
 portfolio_volatility = np.std(portfolio_returns) * np.sqrt(252)
 portfolio_mean_return = np.mean(portfolio_returns) * 252
+#I used a risk free rate of 2% as an example but it does not reflect the accuracy of a any current market.
 risk_free_rate = 0.02
 sharpe_ratio = (portfolio_mean_return - risk_free_rate) / portfolio_volatility
 
