@@ -1,0 +1,130 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import math
+import random
+
+# Black-Scholes formula for option pricing
+def black_scholes(S, K, T, r, sigma, option_type='call'):
+    from scipy.stats import norm
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    
+    if option_type == 'call':
+        price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    elif option_type == 'put':
+        price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    
+    return price
+
+# Fitness function for asset pricing calibration
+def fitness_function(member_params, market_data):
+    S, K, T, market_prices, option_type = market_data
+    r, sigma = member_params
+    
+    # Calculate the predicted prices using the Black-Scholes model
+    predicted_prices = black_scholes(S, K, T, r, sigma, option_type)
+    
+    # Fitness is the mean squared error between predicted and market prices
+    fitness = np.mean((predicted_prices - market_prices) ** 2)
+    
+    return fitness
+
+# Initialize population: each member is a set of parameters [r, sigma]
+def initial_population(n_population, param_bounds):
+    population = []
+    for _ in range(n_population):
+        r = random.uniform(*param_bounds['r'])
+        sigma = random.uniform(*param_bounds['sigma'])
+        population.append([r, sigma])
+    return np.array(population)
+
+# Selection: Choose the best individuals based on fitness
+def selection(population, scores, k=10):
+    selected_population = []
+    for _ in range(k):
+        indices = np.random.choice(len(population), k, replace=False)
+        best_index = indices[np.argmin(scores[indices])]
+        selected_population.append(population[best_index])
+    return np.array(selected_population)
+
+# Crossover: Swap parameters between two parent parameter sets
+def crossover(p1, p2, r_cross):
+    if np.random.rand() < r_cross:
+        c1 = np.array([p1[0], p2[1]])  # Swap r from p1 and sigma from p2
+        c2 = np.array([p2[0], p1[1]])  # Swap r from p2 and sigma from p1
+    else:
+        c1, c2 = p1.copy(), p2.copy()
+    return c1, c2
+
+# Mutation: Introduce random changes to a parameter set
+def mutation(member, r_mut, param_bounds):
+    if np.random.rand() < r_mut:
+        member[0] = random.uniform(*param_bounds['r'])  # Mutate r
+    if np.random.rand() < r_mut:
+        member[1] = random.uniform(*param_bounds['sigma'])  # Mutate sigma
+    return member
+
+# Replacement: Replace part of the population with the new offspring
+def replacement(population, descendants, r_replace):
+    if r_replace == 1.0:
+        return descendants[:len(population)]
+    else:
+        num_to_replace = int(len(population) * r_replace)
+        indices_to_replace = np.random.choice(len(population), num_to_replace, replace=False)
+        population[indices_to_replace] = descendants[:num_to_replace]
+        return population
+
+# Genetic algorithm to calibrate asset pricing model
+def genetic_algorithm(market_data, param_bounds, n_iter, n_pop, r_cross, r_mut, r_replace):
+    population = initial_population(n_pop, param_bounds)
+    best = None
+    best_eval = float('inf')
+
+    for gen in range(n_iter):
+        scores = np.array([fitness_function(individual, market_data) for individual in population])
+
+        if np.min(scores) < best_eval:
+            best_eval = np.min(scores)
+            best = population[np.argmin(scores)].copy()
+
+        selected = selection(population, scores)
+        children = []
+        for i in range(0, len(selected), 2):
+            p1, p2 = selected[i], selected[i+1] if i+1 < len(selected) else selected[0]
+            c1, c2 = crossover(p1, p2, r_cross)
+            children.append(c1)
+            if len(children) < len(population):
+                children.append(c2)
+
+        children = np.array(children[:len(population)])
+        for i in range(len(children)):
+            children[i] = mutation(children[i], r_mut, param_bounds)
+
+        population = replacement(population, children, r_replace)
+
+    return best, best_eval
+
+# Example market data (for option pricing)
+S = 100  # Current stock price
+K = 110  # Strike price
+T = 1  # Time to maturity (1 year)
+market_prices = np.array([10.5])  # Market-observed option price
+option_type = 'call'  # Option type (call or put)
+
+market_data = (S, K, T, market_prices, option_type)
+
+# Parameter bounds (for risk-free rate and volatility)
+param_bounds = {'r': (0.01, 0.05), 'sigma': (0.1, 0.5)}
+
+# Genetic algorithm settings
+n_iter = 1000
+n_pop = 100
+r_cross = 0.9
+r_mut = 0.1
+r_replace = 1.0
+
+# Run the genetic algorithm
+best_params, best_fitness = genetic_algorithm(market_data, param_bounds, n_iter, n_pop, r_cross, r_mut, r_replace)
+
+print(f"Best Parameters: Risk-Free Rate: {best_params[0]}, Volatility: {best_params[1]}")
+print(f"Best Fitness (MSE): {best_fitness}")
